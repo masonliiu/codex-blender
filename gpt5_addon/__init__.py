@@ -49,6 +49,7 @@ class GPT5AddonPreferences(bpy.types.AddonPreferences):
             layout.prop(self, "api_key")
         else:
             layout.prop(self, "api_key_env_var")
+        layout.operator("gpt5.debug_key", text="Debug Key")
 
 
 class GPT5AddonHistoryItem(bpy.types.PropertyGroup):
@@ -236,6 +237,21 @@ class GPT5_OT_ClearHistory(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class GPT5_OT_DebugKey(bpy.types.Operator):
+    bl_idname = "gpt5.debug_key"
+    bl_label = "Debug API Key"
+    bl_description = "Show API key length and last 4 characters"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        api_key = _resolve_api_key(prefs)
+        if not api_key:
+            self.report({'ERROR'}, "OpenAI API key is missing")
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"API key length: {len(api_key)}, last4: {api_key[-4:]}")
+        return {'FINISHED'}
+
+
 def _resolve_api_key(prefs):
     if prefs.api_key_source == "ENV":
         return os.environ.get(prefs.api_key_env_var, "").strip()
@@ -311,6 +327,7 @@ classes = (
     GPT5_UL_PromptHistory,
     GPT5_OT_UseHistory,
     GPT5_OT_ClearHistory,
+    GPT5_OT_DebugKey,
 )
 
 
