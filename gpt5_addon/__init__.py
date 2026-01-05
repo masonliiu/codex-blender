@@ -8,6 +8,10 @@ bl_info = {
     "category": "3D View",
 }
 
+import json
+import urllib.error
+import urllib.request
+
 import bpy
 
 
@@ -73,8 +77,62 @@ class GPT5_OT_SendMessage(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.gpt5_addon
-        props.response = "API call not configured yet."
+        prefs = context.preferences.addons[__name__].preferences
+
+        prompt = props.prompt.strip()
+        if not prompt:
+            self.report({'WARNING'}, "Prompt is empty")
+            return {'CANCELLED'}
+        if not prefs.api_key.strip():
+            self.report({'ERROR'}, "OpenAI API key is missing")
+            return {'CANCELLED'}
+
+        try:
+            props.response = _call_openai_chat(
+                api_key=prefs.api_key.strip(),
+                model=props.model.strip(),
+                prompt=prompt,
+            )
+        except RuntimeError as exc:
+            props.response = f"Error: {exc}"
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+
         return {'FINISHED'}
+
+
+def _call_openai_chat(api_key, model, prompt):
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+    }
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url="https://api.openai.com/v1/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8") if exc.fp else ""
+        raise RuntimeError(f"HTTP {exc.code}: {error_body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Network error: {exc.reason}") from exc
+
+    try:
+        parsed = json.loads(body)
+        return parsed["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Unexpected response from OpenAI") from exc
 
 
 classes = (
