@@ -9,3 +9,7 @@
 - Set an optional system prompt, then enter a prompt and click `Send Message`.
 - Responses stream into the output field as they arrive.
 - Use the history list to reuse past prompts or clear it with `Clear`.
+
+## API Key Options
+- Store the key in Blender preferences, or set `API Key Source` to `Environment Variable`.
+- If using an environment variable, set `OPENAI_API_KEY` (or your chosen name) before launching Blender.
