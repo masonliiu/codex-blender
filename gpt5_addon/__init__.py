@@ -11,6 +11,21 @@ bl_info = {
 import bpy
 
 
+class GPT5AddonPreferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
+
+    api_key: bpy.props.StringProperty(
+        name="OpenAI API Key",
+        subtype="PASSWORD",
+        description="Stored locally in Blender preferences",
+        default="",
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "api_key")
+
+
 class GPT5AddonProperties(bpy.types.PropertyGroup):
     prompt: bpy.props.StringProperty(
         name="Prompt",
@@ -39,18 +54,34 @@ class GPT5AddonPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         props = context.scene.gpt5_addon
+        prefs = context.preferences.addons[__name__].preferences
 
         layout.prop(props, "model")
         layout.prop(props, "prompt")
         layout.operator("gpt5.send_message", icon="PLAY")
         layout.separator()
+        if not prefs.api_key:
+            layout.label(text="Set API key in Add-on Preferences", icon="ERROR")
         layout.label(text="Response")
         layout.prop(props, "response", text="")
 
 
+class GPT5_OT_SendMessage(bpy.types.Operator):
+    bl_idname = "gpt5.send_message"
+    bl_label = "Send Message"
+    bl_description = "Send the prompt to OpenAI"
+
+    def execute(self, context):
+        props = context.scene.gpt5_addon
+        props.response = "API call not configured yet."
+        return {'FINISHED'}
+
+
 classes = (
+    GPT5AddonPreferences,
     GPT5AddonProperties,
     GPT5AddonPanel,
+    GPT5_OT_SendMessage,
 )
 
 
