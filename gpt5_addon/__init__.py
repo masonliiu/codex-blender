@@ -32,6 +32,10 @@ class GPT5AddonPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "api_key")
 
 
+class GPT5AddonHistoryItem(bpy.types.PropertyGroup):
+    text: bpy.props.StringProperty(name="Text", default="")
+
+
 class GPT5AddonProperties(bpy.types.PropertyGroup):
     system_prompt: bpy.props.StringProperty(
         name="System Prompt",
@@ -54,6 +58,11 @@ class GPT5AddonProperties(bpy.types.PropertyGroup):
         description="OpenAI model name",
         default="gpt-5.2",
     )
+    history: bpy.props.CollectionProperty(type=GPT5AddonHistoryItem)
+    history_index: bpy.props.IntProperty(
+        name="History Index",
+        default=-1,
+    )
 
 
 class GPT5AddonPanel(bpy.types.Panel):
@@ -72,6 +81,20 @@ class GPT5AddonPanel(bpy.types.Panel):
         layout.prop(props, "system_prompt")
         layout.prop(props, "prompt")
         layout.operator("gpt5.send_message", icon="PLAY")
+        layout.separator()
+        layout.label(text="History")
+        layout.template_list(
+            "GPT5_UL_prompt_history",
+            "",
+            props,
+            "history",
+            props,
+            "history_index",
+            rows=4,
+        )
+        row = layout.row(align=True)
+        row.operator("gpt5.use_history", text="Use Selected")
+        row.operator("gpt5.clear_history", text="Clear")
         layout.separator()
         if not prefs.api_key:
             layout.label(text="Set API key in Add-on Preferences", icon="ERROR")
@@ -97,6 +120,9 @@ class GPT5_OT_SendMessage(bpy.types.Operator):
             return {'CANCELLED'}
 
         props.response = ""
+        history_item = props.history.add()
+        history_item.text = prompt
+        props.history_index = len(props.history) - 1
         self._queue = queue.Queue()
         self._done = False
         self._error = None
@@ -155,6 +181,39 @@ class GPT5_OT_SendMessage(bpy.types.Operator):
         if self._timer:
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
+
+
+class GPT5_UL_PromptHistory(bpy.types.UIList):
+    bl_idname = "GPT5_UL_prompt_history"
+
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        layout.label(text=item.text)
+
+
+class GPT5_OT_UseHistory(bpy.types.Operator):
+    bl_idname = "gpt5.use_history"
+    bl_label = "Use Selected History"
+    bl_description = "Copy the selected history item into the prompt"
+
+    def execute(self, context):
+        props = context.scene.gpt5_addon
+        if props.history_index < 0 or props.history_index >= len(props.history):
+            self.report({'WARNING'}, "No history item selected")
+            return {'CANCELLED'}
+        props.prompt = props.history[props.history_index].text
+        return {'FINISHED'}
+
+
+class GPT5_OT_ClearHistory(bpy.types.Operator):
+    bl_idname = "gpt5.clear_history"
+    bl_label = "Clear History"
+    bl_description = "Clear prompt history"
+
+    def execute(self, context):
+        props = context.scene.gpt5_addon
+        props.history.clear()
+        props.history_index = -1
+        return {'FINISHED'}
 
 
 def _stream_openai_response(queue_out, cancel_event, api_key, model, system_prompt, prompt):
@@ -219,9 +278,13 @@ def _stream_openai_response(queue_out, cancel_event, api_key, model, system_prom
 
 classes = (
     GPT5AddonPreferences,
+    GPT5AddonHistoryItem,
     GPT5AddonProperties,
     GPT5AddonPanel,
     GPT5_OT_SendMessage,
+    GPT5_UL_PromptHistory,
+    GPT5_OT_UseHistory,
+    GPT5_OT_ClearHistory,
 )
 
 
