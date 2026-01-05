@@ -6,4 +6,6 @@
 
 ## Use
 - Open the 3D Viewport sidebar (N key), then the `GPT` tab.
-- Enter a prompt and click `Send Message`.
+- Set an optional system prompt, then enter a prompt and click `Send Message`.
+- Responses stream into the output field as they arrive.
+- Use the history list to reuse past prompts or clear it with `Clear`.
