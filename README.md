@@ -1,0 +1,1 @@
+# Blender add-on to include GPT-5.2
