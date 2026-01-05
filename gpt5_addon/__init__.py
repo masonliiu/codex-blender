@@ -1,6 +1,6 @@
 bl_info = {
     "name": "GPT-5.2 Chat",
-    "author": "Codex",
+    "author": "Mason Liu",
     "version": (0, 2, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > GPT",
