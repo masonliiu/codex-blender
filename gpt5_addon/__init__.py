@@ -246,16 +246,34 @@ class GPT5_OT_DebugKey(bpy.types.Operator):
         prefs = context.preferences.addons[__name__].preferences
         api_key = _resolve_api_key(prefs)
         if not api_key:
-            self.report({'ERROR'}, "OpenAI API key is missing")
+            env_name = _env_var_name(prefs)
+            env_present = bool(os.environ.get(env_name, "").strip())
+            self.report({'ERROR'}, f"API key missing. Env var {env_name} set: {env_present}")
             return {'CANCELLED'}
         self.report({'INFO'}, f"API key length: {len(api_key)}, last4: {api_key[-4:]}")
         return {'FINISHED'}
 
 
+def _env_var_name(prefs):
+    return (prefs.api_key_env_var or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY"
+
+
 def _resolve_api_key(prefs):
     if prefs.api_key_source == "ENV":
-        return os.environ.get(prefs.api_key_env_var, "").strip()
-    return prefs.api_key.strip()
+        env_name = _env_var_name(prefs)
+        env_value = os.environ.get(env_name, "").strip()
+        if env_value:
+            return env_value
+        if env_name != "OPENAI_API_KEY":
+            fallback = os.environ.get("OPENAI_API_KEY", "").strip()
+            if fallback:
+                return fallback
+        return ""
+    prefs_value = prefs.api_key.strip()
+    if prefs_value:
+        return prefs_value
+    env_name = _env_var_name(prefs)
+    return os.environ.get(env_name, "").strip()
 
 
 def _stream_openai_response(queue_out, cancel_event, api_key, model, system_prompt, prompt):
