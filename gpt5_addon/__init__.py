@@ -51,7 +51,6 @@ class GPT5AddonProperties(bpy.types.PropertyGroup):
         name="Response",
         description="Last response from the model",
         default="",
-        options={'MULTILINE'},
     )
     model: bpy.props.StringProperty(
         name="Model",
