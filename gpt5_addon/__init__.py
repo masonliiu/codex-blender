@@ -281,11 +281,11 @@ def _stream_openai_response(queue_out, cancel_event, api_key, model, system_prom
     if system_prompt:
         input_messages.append({
             "role": "system",
-            "content": [{"type": "text", "text": system_prompt}],
+            "content": [{"type": "input_text", "text": system_prompt}],
         })
     input_messages.append({
         "role": "user",
-        "content": [{"type": "text", "text": prompt}],
+        "content": [{"type": "input_text", "text": prompt}],
     })
     payload = {
         "model": model,
