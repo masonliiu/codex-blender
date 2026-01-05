@@ -9,6 +9,7 @@ bl_info = {
 }
 
 import json
+import os
 import queue
 import threading
 import urllib.error
@@ -20,16 +21,34 @@ import bpy
 class GPT5AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __name__
 
+    api_key_source: bpy.props.EnumProperty(
+        name="API Key Source",
+        description="Where to read the OpenAI API key from",
+        items=(
+            ("PREFERENCES", "Preferences", "Store key in Blender preferences"),
+            ("ENV", "Environment Variable", "Read key from an environment variable"),
+        ),
+        default="PREFERENCES",
+    )
     api_key: bpy.props.StringProperty(
         name="OpenAI API Key",
         subtype="PASSWORD",
         description="Stored locally in Blender preferences",
         default="",
     )
+    api_key_env_var: bpy.props.StringProperty(
+        name="Env Var Name",
+        description="Environment variable that holds the OpenAI API key",
+        default="OPENAI_API_KEY",
+    )
 
     def draw(self, context):
         layout = self.layout
-        layout.prop(self, "api_key")
+        layout.prop(self, "api_key_source")
+        if self.api_key_source == "PREFERENCES":
+            layout.prop(self, "api_key")
+        else:
+            layout.prop(self, "api_key_env_var")
 
 
 class GPT5AddonHistoryItem(bpy.types.PropertyGroup):
@@ -110,12 +129,14 @@ class GPT5_OT_SendMessage(bpy.types.Operator):
         props = context.scene.gpt5_addon
         prefs = context.preferences.addons[__name__].preferences
 
+        api_key = _resolve_api_key(prefs)
+        if not api_key:
+            self.report({'ERROR'}, "OpenAI API key is missing")
+            return {'CANCELLED'}
+
         prompt = props.prompt.strip()
         if not prompt:
             self.report({'WARNING'}, "Prompt is empty")
-            return {'CANCELLED'}
-        if not prefs.api_key.strip():
-            self.report({'ERROR'}, "OpenAI API key is missing")
             return {'CANCELLED'}
 
         props.response = ""
@@ -134,7 +155,7 @@ class GPT5_OT_SendMessage(bpy.types.Operator):
             args=(
                 self._queue,
                 self._cancel_event,
-                prefs.api_key.strip(),
+                api_key,
                 props.model.strip(),
                 props.system_prompt.strip(),
                 prompt,
@@ -213,6 +234,12 @@ class GPT5_OT_ClearHistory(bpy.types.Operator):
         props.history.clear()
         props.history_index = -1
         return {'FINISHED'}
+
+
+def _resolve_api_key(prefs):
+    if prefs.api_key_source == "ENV":
+        return os.environ.get(prefs.api_key_env_var, "").strip()
+    return prefs.api_key.strip()
 
 
 def _stream_openai_response(queue_out, cancel_event, api_key, model, system_prompt, prompt):
