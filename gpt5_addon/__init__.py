@@ -9,6 +9,8 @@ bl_info = {
 }
 
 import json
+import queue
+import threading
 import urllib.error
 import urllib.request
 
@@ -94,22 +96,68 @@ class GPT5_OT_SendMessage(bpy.types.Operator):
             self.report({'ERROR'}, "OpenAI API key is missing")
             return {'CANCELLED'}
 
-        try:
-            props.response = _call_openai_response(
-                api_key=prefs.api_key.strip(),
-                model=props.model.strip(),
-                system_prompt=props.system_prompt.strip(),
-                prompt=prompt,
-            )
-        except RuntimeError as exc:
-            props.response = f"Error: {exc}"
-            self.report({'ERROR'}, str(exc))
+        props.response = ""
+        self._queue = queue.Queue()
+        self._done = False
+        self._error = None
+        self._cancel_event = threading.Event()
+        self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
+        context.window_manager.modal_handler_add(self)
+
+        self._thread = threading.Thread(
+            target=_stream_openai_response,
+            args=(
+                self._queue,
+                self._cancel_event,
+                prefs.api_key.strip(),
+                props.model.strip(),
+                props.system_prompt.strip(),
+                prompt,
+            ),
+            daemon=True,
+        )
+        self._thread.start()
+
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        if event.type == 'TIMER':
+            props = context.scene.gpt5_addon
+            while True:
+                try:
+                    item = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                if item["type"] == "delta":
+                    props.response += item["text"]
+                elif item["type"] == "error":
+                    self._error = item["message"]
+                elif item["type"] == "done":
+                    self._done = True
+
+            if self._error:
+                props.response = f"Error: {self._error}"
+                self.report({'ERROR'}, self._error)
+                self._cleanup(context)
+                return {'CANCELLED'}
+            if self._done:
+                self._cleanup(context)
+                return {'FINISHED'}
+
+        if event.type in {'ESC'}:
+            self._cancel_event.set()
+            self._cleanup(context)
             return {'CANCELLED'}
 
-        return {'FINISHED'}
+        return {'PASS_THROUGH'}
+
+    def _cleanup(self, context):
+        if self._timer:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
 
 
-def _call_openai_response(api_key, model, system_prompt, prompt):
+def _stream_openai_response(queue_out, cancel_event, api_key, model, system_prompt, prompt):
     input_messages = []
     if system_prompt:
         input_messages.append({
@@ -123,6 +171,7 @@ def _call_openai_response(api_key, model, system_prompt, prompt):
     payload = {
         "model": model,
         "input": input_messages,
+        "stream": True,
     }
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -136,29 +185,36 @@ def _call_openai_response(api_key, model, system_prompt, prompt):
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            body = response.read().decode("utf-8")
+        with urllib.request.urlopen(request, timeout=60) as response:
+            for raw_line in response:
+                if cancel_event.is_set():
+                    break
+                line = raw_line.decode("utf-8").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                data_str = line[5:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                event_type = event.get("type")
+                if event_type == "response.output_text.delta":
+                    queue_out.put({"type": "delta", "text": event.get("delta", "")})
+                elif event_type == "response.completed":
+                    break
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8") if exc.fp else ""
-        raise RuntimeError(f"HTTP {exc.code}: {error_body}") from exc
+        queue_out.put({"type": "error", "message": f"HTTP {exc.code}: {error_body}"})
+        queue_out.put({"type": "done"})
+        return
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Network error: {exc.reason}") from exc
+        queue_out.put({"type": "error", "message": f"Network error: {exc.reason}"})
+        queue_out.put({"type": "done"})
+        return
 
-    try:
-        parsed = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Unexpected response from OpenAI") from exc
-
-    output_text = []
-    for output_item in parsed.get("output", []):
-        for content_item in output_item.get("content", []):
-            if content_item.get("type") == "output_text":
-                output_text.append(content_item.get("text", ""))
-
-    if not output_text:
-        raise RuntimeError("No text output returned from OpenAI")
-
-    return "".join(output_text).strip()
+    queue_out.put({"type": "done"})
 
 
 classes = (
