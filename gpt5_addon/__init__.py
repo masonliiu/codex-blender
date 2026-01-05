@@ -1,7 +1,7 @@
 bl_info = {
     "name": "GPT-5.2 Chat",
     "author": "Codex",
-    "version": (0, 1, 0),
+    "version": (0, 2, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > GPT",
     "description": "Chat with OpenAI models from Blender",
@@ -31,6 +31,11 @@ class GPT5AddonPreferences(bpy.types.AddonPreferences):
 
 
 class GPT5AddonProperties(bpy.types.PropertyGroup):
+    system_prompt: bpy.props.StringProperty(
+        name="System Prompt",
+        description="Optional system guidance for the model",
+        default="",
+    )
     prompt: bpy.props.StringProperty(
         name="Prompt",
         description="Message to send to the model",
@@ -40,6 +45,7 @@ class GPT5AddonProperties(bpy.types.PropertyGroup):
         name="Response",
         description="Last response from the model",
         default="",
+        options={'MULTILINE'},
     )
     model: bpy.props.StringProperty(
         name="Model",
@@ -61,6 +67,7 @@ class GPT5AddonPanel(bpy.types.Panel):
         prefs = context.preferences.addons[__name__].preferences
 
         layout.prop(props, "model")
+        layout.prop(props, "system_prompt")
         layout.prop(props, "prompt")
         layout.operator("gpt5.send_message", icon="PLAY")
         layout.separator()
@@ -88,9 +95,10 @@ class GPT5_OT_SendMessage(bpy.types.Operator):
             return {'CANCELLED'}
 
         try:
-            props.response = _call_openai_chat(
+            props.response = _call_openai_response(
                 api_key=prefs.api_key.strip(),
                 model=props.model.strip(),
+                system_prompt=props.system_prompt.strip(),
                 prompt=prompt,
             )
         except RuntimeError as exc:
@@ -101,16 +109,24 @@ class GPT5_OT_SendMessage(bpy.types.Operator):
         return {'FINISHED'}
 
 
-def _call_openai_chat(api_key, model, prompt):
+def _call_openai_response(api_key, model, system_prompt, prompt):
+    input_messages = []
+    if system_prompt:
+        input_messages.append({
+            "role": "system",
+            "content": [{"type": "text", "text": system_prompt}],
+        })
+    input_messages.append({
+        "role": "user",
+        "content": [{"type": "text", "text": prompt}],
+    })
     payload = {
         "model": model,
-        "messages": [
-            {"role": "user", "content": prompt},
-        ],
+        "input": input_messages,
     }
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        url="https://api.openai.com/v1/chat/completions",
+        url="https://api.openai.com/v1/responses",
         data=data,
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -130,9 +146,19 @@ def _call_openai_chat(api_key, model, prompt):
 
     try:
         parsed = json.loads(body)
-        return parsed["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
         raise RuntimeError("Unexpected response from OpenAI") from exc
+
+    output_text = []
+    for output_item in parsed.get("output", []):
+        for content_item in output_item.get("content", []):
+            if content_item.get("type") == "output_text":
+                output_text.append(content_item.get("text", ""))
+
+    if not output_text:
+        raise RuntimeError("No text output returned from OpenAI")
+
+    return "".join(output_text).strip()
 
 
 classes = (
